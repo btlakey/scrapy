@@ -1,5 +1,11 @@
 import scrapy
 from toolz import curry
+import logging
+import locale
+
+logger = logging.getLogger('shelves_logger')
+logger.STDOUT = True
+locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')  # this handles commas in string numbers
 
 
 class ShelvesSpider(scrapy.Spider):
@@ -14,17 +20,18 @@ class ShelvesSpider(scrapy.Spider):
         "https://www.goodreads.com/review/list/40648422"
     ]
 
-    def response_get(self, response, x, is_int=False):
+    def response_get(self, response, xpath_query, **kwargs):
         """
 
         :param response:
         :param x:
-        :param is_int:
         :return:
         """
-        val = response.xpath(x).get()
-        if is_int:
-            int(str.strip(val))
+        # the . prevents the xpath query from going all the way back to the root node
+        val = response.xpath("." + xpath_query).get().strip()
+        for type_check, convert in zip(["is_int", "is_float"], [int, float]):
+            if kwargs.get(type_check, False):
+                val = convert(locale.atoi(val))  # remove any commas that might be there
         return val
 
     def convert_rating(self, rating:str):
@@ -62,22 +69,29 @@ class ShelvesSpider(scrapy.Spider):
         :return:
         """
         for book in response_shelf.xpath(
-                "//*[@id='booksBody']//*[@class='bookalike review']"
+            "//*[@id='booksBody']//*[@class='bookalike review']"
         ):
             yield self.parse_book(book)
 
-    def get_review(self, reponse_review):
+    def get_review(self, response):
+        """
+
+        """
+        review_url = response.xpath(
+            "//*[@class='field actions']//*[text()='view (with text)']/@href"
+        )
+        yield response.follow(review_url, self.parse_review)
+
+    def parse_review(self, response_review):
         """
 
         :param reponse_review:
         :return:
         """
-        def parse_review(response):
-            # TODO: come back here for extracting text of review
-            yield response.xpath("")
-
-
-        yield scrapy.Request(reponse_review.urljoin(href), parse_review)
+        yield self.response_get(
+            response_review,
+            "//*[@itemprop='reviewBody']//text()"
+        )
 
     def parse_book(self, response_book):
         """
@@ -88,7 +102,7 @@ class ShelvesSpider(scrapy.Spider):
         # book_xpath = lambda x: response_book.xpath(x).get()
         book_xpath = curry(self.response_get)(response_book)
 
-        yield {
+        return {
             "title": book_xpath(
                 "//*[@class='field title']//@title"
             ),
@@ -99,26 +113,24 @@ class ShelvesSpider(scrapy.Spider):
                 "//*[@class='field author']//a//text()"
             ),
             "date_pub": book_xpath(
-                "//*[@class='field date_pub']//div//text()", is_int=True
-            )
+                "//*[@class='field date_pub']//div//text()"
+            ),
             "mean_rating": book_xpath(
-                "//*[@class='field avg_rating']//div//text()", is_int=True
+                "//*[@class='field avg_rating']//div//text()", is_float=True
             ),
             "num_rating": book_xpath(
                 "//*[@class='field num_ratings']//div//text()", is_int=True
             ),
-            "user_rating": convert_rating(book_xpath(
-                "//*[@class='field rating']//*[@class=' staticStars notranslate']/@title"
-            )),
-            "date_read": book_xpath(
-                "//*[@class='field date_read']//*[@class='date_read_value']/text()"
-            ),
-            "date_added": book_xpath(
-                "//*[@class='field date_added']//div//@title"
-            ),
-            "review_text": self.parse_review(response_book.xpath(
-                "//*[@class='field actions']//*[text()='view (with text)']/@href"
-            ))
+            # "user_rating": self.convert_rating(book_xpath(
+            #     "//*[@class='field rating']//*[@class=' staticStars notranslate']/@title"
+            # )),
+            # "date_read": book_xpath(
+            #     "//*[@class='field date_read']//*[@class='date_read_value']/text()"
+            # ),
+            # "date_added": book_xpath(
+            #     "//*[@class='field date_added']//div//@title"
+            # ),
+            # "review_text": self.get_review(response_book)
         }
 
 
