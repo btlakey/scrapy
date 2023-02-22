@@ -2,6 +2,7 @@ import scrapy
 from toolz import curry
 import logging
 import locale
+import re
 
 logger = logging.getLogger('shelves_logger')
 logger.STDOUT = True
@@ -15,6 +16,7 @@ class ShelvesSpider(scrapy.Spider):
     name = "shelves"
     shelf_names = ["favorite", "reread", "must", "best"]
     shelf_names_re = "|".join(shelf_names)
+    shelf = {}
 
     start_urls = [
         "https://www.goodreads.com/review/list/40648422"
@@ -29,9 +31,13 @@ class ShelvesSpider(scrapy.Spider):
         """
         # the . prevents the xpath query from going all the way back to the root node
         val = response.xpath("." + xpath_query).get().strip()
-        for type_check, convert in zip(["is_int", "is_float"], [int, float]):
-            if kwargs.get(type_check, False):
-                val = convert(locale.atoi(val))  # remove any commas that might be there
+        logging.info(f"val: {val}")
+        try:
+            for type_check, convert in zip(["is_int", "is_float"], [int, float]):
+                if kwargs.get(type_check, False):
+                    val = convert(locale.atof(val))  # remove any commas that might be there
+        except ValueError:  # sometimes isbn13 is empty string
+            val = None
         return val
 
     def convert_rating(self, rating:str):
@@ -103,6 +109,7 @@ class ShelvesSpider(scrapy.Spider):
         book_xpath = curry(self.response_get)(response_book)
 
         return {
+            "shelf": response_book,
             "title": book_xpath(
                 "//*[@class='field title']//@title"
             ),
