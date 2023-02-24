@@ -1,7 +1,7 @@
 import scrapy
 from toolz import curry
-import logging
 import locale
+import logging
 
 logger = logging.getLogger('shelves_logger')
 logger.STDOUT = True
@@ -12,7 +12,6 @@ class ShelvesSpider(scrapy.Spider):
     name = "shelves"
     shelf_names = ["favorite", "reread", "must", "best"]
     shelf_names_re = "|".join(shelf_names)
-    shelf = {}
 
     start_urls = [
         "https://www.goodreads.com/review/list/40648422"
@@ -21,18 +20,19 @@ class ShelvesSpider(scrapy.Spider):
     def response_get(self, response, xpath_query, **kwargs):
         # the . prevents the xpath query from going all the way back to the root node
         val = response.xpath("." + xpath_query).get()
-        # logger.info(f"val: {val}")
 
-        # various fields sometimes return empty string
-        if val is None:
-            return None
-
-        else:
+        # various fields sometimes return None, empty string, or only whitespace
+        try:
             val = val.strip()
+        except AttributeError:
+            pass
+
+        if not val:
+            return None
+        else:
             for type_check, convert in zip(["is_int", "is_float"], [int, float]):
                 if kwargs.get(type_check, False):
                     val = convert(locale.atof(val))  # remove any commas that might be there; atof=float
-            logger.info(f"val: {val}")
             return val
 
     def convert_rating(self, rating:str):
@@ -52,6 +52,12 @@ class ShelvesSpider(scrapy.Spider):
                 f"//*[@id='paginatedShelfList']//*[re:test(@title, '{self.shelf_names_re}')]/@href"
             )
         yield from response.follow_all(shelf_urls, self.parse_shelf)
+
+    def parse_shelf(self, response_shelf):
+        for book in response_shelf.xpath(
+            "//*[@id='booksBody']//*[@class='bookalike review']"
+        ):
+            yield self.parse_book(book)
 
     def parse_book(self, response_book):
         # book_xpath = lambda x: response_book.xpath(x).get()
